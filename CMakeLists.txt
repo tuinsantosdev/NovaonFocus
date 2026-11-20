@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(NovaonFocus VERSION 0.1.0 LANGUAGES CXX)
+project(NovaonFocus VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -26,7 +26,7 @@ add_library(novaon_core STATIC
   src/core/WasapiSource.cpp
 )
 target_include_directories(novaon_core PUBLIC src/core)
-target_link_libraries(novaon_core PUBLIC ole32 avrt mmdevapi uuid)
+target_link_libraries(novaon_core PUBLIC ole32 shell32 avrt mmdevapi uuid)
 
 add_executable(novaonfocus src/app/main.cpp)
 target_link_libraries(novaonfocus PRIVATE novaon_core)

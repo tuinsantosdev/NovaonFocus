@@ -107,14 +107,7 @@ LRESULT WINAPI wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-std::wstring defaultConfigPath() {
-    wchar_t buf[MAX_PATH];
-    const DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
-    std::wstring path(buf, n);
-    const size_t slash = path.find_last_of(L"\\/");
-    path = slash == std::wstring::npos ? L"" : path.substr(0, slash + 1);
-    return path + L"novaonfocus.ini";
-}
+std::wstring defaultConfigPath() { return novaon::resolveConfigPath(); }
 
 } // namespace
 

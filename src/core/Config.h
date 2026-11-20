@@ -57,6 +57,12 @@ bool saveConfig(const std::wstring& path, const EngineConfig& cfg, std::string& 
 
 const char* sourceTypeName(SourceType t); // "capture", "loopback", ...
 
+// Onde fica o novaonfocus.ini:
+//  - ao lado do .exe, se essa pasta aceita escrita (versão "portátil", zip);
+//  - senão (instalado em Arquivos de Programas), em %APPDATA%\NovaonFocus,
+//    copiando o .ini de exemplo do lado do .exe na primeira execução.
+std::wstring resolveConfigPath();
+
 std::wstring utf8ToWide(const std::string& s);
 std::string wideToUtf8(const std::wstring& s);
 

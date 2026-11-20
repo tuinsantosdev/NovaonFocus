@@ -62,10 +62,17 @@ Para mandar partes diferentes (por exemplo só a voz e só o beat), use instânc
 
 ## Instalação
 
-1. Baixe o `NovaonFocus-windows-x64` na aba **Actions** do GitHub (último build verde).
-2. Copie `obs-plugins\64bit\novaonfocus-obs.dll` para `C:\Program Files\obs-studio\obs-plugins\64bit\`.
-3. Se usar uma DAW no ASIO, copie `vst3\novaonfocus-send.vst3` para `C:\Program Files\Common Files\VST3\` (veja a seção "DAW no Focusrite USB ASIO").
-4. Coloque `novaonfocus-gui.exe`, `novaonfocus.exe` e `novaonfocus.ini` numa pasta sua.
+Baixe o **`NovaonFocus-x.y.z-Setup.exe`** na página de [versões](https://github.com/tuinsantosdev/NovaonFocus/releases) e rode. Ele instala:
+
+- o NovaonFocus (interface e motor), com atalho no menu Iniciar;
+- o plugin VST3 **NovaonFocus Send** em `C:\Program Files\Common Files\VST3\`;
+- o plugin do OBS na pasta do OBS, se ele estiver instalado.
+
+Feche o OBS e a DAW antes de instalar. A configuração fica em `%APPDATA%\NovaonFocus\novaonfocus.ini` e é mantida nas atualizações. No FL Studio, rode *Options > Manage plugins > Find more plugins* depois de instalar.
+
+O instalador não tem assinatura digital: se o Windows mostrar "O Windows protegeu o computador", clique em *Mais informações > Executar assim mesmo*.
+
+**Versão portátil:** o zip `NovaonFocus-windows-x64` de cada build traz os mesmos arquivos soltos. Nesse caso o `novaonfocus.ini` fica ao lado do `.exe`.
 
 ## Interface gráfica
 
