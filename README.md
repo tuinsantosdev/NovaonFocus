@@ -62,10 +62,31 @@ Para mandar partes diferentes (por exemplo só a voz e só o beat), use instânc
 
 ## Instalação
 
-1. Baixe o `NovaonFocus-windows-x64` na aba **Actions** do GitHub (último build verde).
-2. Copie `obs-plugins\64bit\novaonfocus-obs.dll` para `C:\Program Files\obs-studio\obs-plugins\64bit\`.
-3. Se usar uma DAW no ASIO, copie `vst3\novaonfocus-send.vst3` para `C:\Program Files\Common Files\VST3\` (veja a seção "DAW no Focusrite USB ASIO").
-4. Coloque `novaonfocus.exe` e `novaonfocus.ini` numa pasta sua.
+Baixe o **`NovaonFocus-x.y.z-Setup.exe`** na página de [versões](https://github.com/tuinsantosdev/NovaonFocus/releases) e rode. Ele instala:
+
+- o NovaonFocus (interface e motor), com atalho no menu Iniciar;
+- o plugin VST3 **NovaonFocus Send** em `C:\Program Files\Common Files\VST3\`;
+- o plugin do OBS na pasta do OBS, se ele estiver instalado.
+
+Feche o OBS e a DAW antes de instalar. A configuração fica em `%APPDATA%\NovaonFocus\novaonfocus.ini` e é mantida nas atualizações. No FL Studio, rode *Options > Manage plugins > Find more plugins* depois de instalar.
+
+O instalador não tem assinatura digital: se o Windows mostrar "O Windows protegeu o computador", clique em *Mais informações > Executar assim mesmo*.
+
+**Versão portátil:** o zip `NovaonFocus-windows-x64` de cada build traz os mesmos arquivos soltos. Nesse caso o `novaonfocus.ini` fica ao lado do `.exe`.
+
+## Interface gráfica
+
+Dê duplo clique no **`novaonfocus-gui.exe`**. Ele lê e grava o mesmo `novaonfocus.ini` e liga o roteamento sozinho ao abrir.
+
+- **Mixer:** escolha o barramento no topo (`live`, `mic`...) e ajuste cada fonte no fader. Duplo clique no fader volta para 0 dB, a roda do mouse anda 1 dB, e o botão **MUDO** corta a fonte só naquele barramento. Fontes fora do barramento mostram **INCLUIR**. À direita fica o medidor da saída que vai para o OBS.
+- **Fontes:** cada fonte com estado (rodando, conectando, aguardando; para o `send`, conectado ou desconectado), nível e falhas. Clique para editar; o tipo, o dispositivo e o programa são escolhidos em listas, sem digitar nomes de cabeça.
+- **Send da DAW:** se houver fonte `send`, o Mixer mostra um cartão com o canal do plugin, a taxa da DAW, o atraso atual contra o alvo e a correção de relógio em ppm, com o histórico do último minuto.
+- **OBS:** passo a passo para ligar o plugin e botão para copiar o nome de cada barramento.
+- **Ajustes:** folga (latência), tabela de diagnóstico de falhas e travamentos, e atalho para a pasta do `.ini`.
+
+Volumes e mudos mudam na hora e são gravados sozinhos. Criar, apagar ou editar fontes e barramentos pede **APLICAR MUDANÇAS** na barra de baixo, que reinicia o motor (corte de cerca de 1 segundo). O botão redondo da barra de baixo liga e desliga o roteamento.
+
+O modo terminal (`novaonfocus.exe`) continua igual. Use um ou outro de cada vez, porque os dois escrevem nos mesmos barramentos.
 
 ## Uso
 
@@ -100,7 +121,7 @@ No OBS, adicione a fonte **NovaonFocus Bus** e digite o nome do barramento (`liv
 
 ## Compilar
 
-Precisa do Visual Studio 2022 e do CMake.
+Precisa do Visual Studio 2022 e do CMake. A interface baixa o Dear ImGui sozinha na configuração (desligue com `-DNOVAON_BUILD_GUI=OFF`).
 
 ```
 cmake -S . -B build -A x64
@@ -117,7 +138,7 @@ cmake -S . -B build -A x64 -DNOVAON_BUILD_OBS_PLUGIN=ON -DNOVAON_OBS_SOURCE_DIR=
 
 ## Próximos passos
 
-- Interface gráfica (Dear ImGui) com faders, medidores e matriz de roteamento.
+- Ícone na bandeja do sistema e iniciar junto com o Windows.
 - Barramento de monitoração tocando direto no fone da Scarlett.
 - Recarregar o `.ini` sem reiniciar.
 - Captura ASIO opcional para o microfone com o buffer mínimo.

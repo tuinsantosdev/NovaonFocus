@@ -224,7 +224,7 @@ private:
 BEGIN_FACTORY_DEF("NovaonFocus", "https://github.com/tuinsantosdev/NovaonFocus", "")
 
 DEF_CLASS2(INLINE_UID_FROM_FUID(kSendUID), PClassInfo::kManyInstances, kVstAudioEffectClass,
-           "NovaonFocus Send", 0, Vst::PlugType::kFx, "0.1.0", kVstVersionString,
+           "NovaonFocus Send", 0, Vst::PlugType::kFx, "1.0.0", kVstVersionString,
            SendEffect::createInstance)
 
 END_FACTORY

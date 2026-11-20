@@ -378,6 +378,8 @@ bool WasapiSource::runSend() {
         const bool alive = valid && GetTickCount64() - header->heartbeatMs.load(std::memory_order_relaxed) < 250;
         if (!alive) {
             state_ = SourceState::Waiting;
+            sendRate_.store(0, std::memory_order_relaxed);
+            sendPpm_.store(0.0f, std::memory_order_relaxed);
             synced = false;
             continue;
         }
@@ -400,6 +402,8 @@ bool WasapiSource::runSend() {
         double err = (fill - target) / target;
         err = std::clamp(err, -1.0, 1.0);
         const double step = double(rate) / double(kBusSampleRate) * (1.0 + 0.005 * err);
+        sendRate_.store(rate, std::memory_order_relaxed);
+        sendPpm_.store(float(0.005 * err * 1e6), std::memory_order_relaxed);
 
         while (readPos < w) {
             const size_t n = size_t(std::min<uint64_t>(w - readPos, 1024));
@@ -415,6 +419,8 @@ bool WasapiSource::runSend() {
         }
     }
 
+    sendRate_.store(0, std::memory_order_relaxed);
+    sendPpm_.store(0.0f, std::memory_order_relaxed);
     if (timer) CloseHandle(timer);
     UnmapViewOfFile(header);
     CloseHandle(mapping);

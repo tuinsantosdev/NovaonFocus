@@ -29,6 +29,12 @@ struct SourceStats {
     uint64_t underruns = 0;
     uint64_t drops = 0;
     uint64_t reconnects = 0;
+    float peak = 0.0f; // pico desde a última consulta (antes dos ganhos)
+    // Fontes "send": taxa da DAW (0 = plugin desconectado), correção de
+    // relógio em ppm e a folga alvo do buffer, em quadros de 48 kHz.
+    uint32_t sendRate = 0;
+    float sendPpm = 0.0f;
+    size_t targetFrames = 0;
 };
 
 class Mixer {
@@ -69,6 +75,7 @@ private:
     std::vector<std::unique_ptr<WasapiSource>> sources_;
     std::vector<std::unique_ptr<Bus>> buses_;
     std::vector<std::vector<float>> sourceBlocks_;
+    std::unique_ptr<std::atomic<float>[]> sourcePeaks_;
     std::vector<float> mixBlock_;
     std::thread thread_;
     std::atomic<bool> running_{false};

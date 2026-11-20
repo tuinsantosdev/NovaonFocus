@@ -48,6 +48,12 @@ public:
     uint64_t drops() const { return drops_.load(std::memory_order_relaxed); }
     uint64_t reconnects() const { return reconnects_.load(std::memory_order_relaxed); }
 
+    // Só para "send": taxa da DAW (0 = desconectado) e correção de relógio
+    // aplicada agora, em ppm (positivo = consumindo mais rápido).
+    uint32_t sendRate() const { return sendRate_.load(std::memory_order_relaxed); }
+    float sendCorrectionPpm() const { return sendPpm_.load(std::memory_order_relaxed); }
+    size_t targetFrames() const { return targetFrames_; }
+
 private:
     void threadMain();
     bool runOnce(); // retorna quando a sessão termina; false = falha ao abrir
@@ -59,6 +65,8 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<SourceState> state_{SourceState::Stopped};
     size_t targetFrames_ = 960;
+    std::atomic<uint32_t> sendRate_{0};
+    std::atomic<float> sendPpm_{0.0f};
 
     // Estado do consumidor (só a thread do mixer mexe).
     bool primed_ = false;

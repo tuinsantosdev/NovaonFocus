@@ -34,6 +34,8 @@ Mixer::Mixer(const EngineConfig& cfg)
         sources_.back()->setTargetFrames(targetFrames_);
     }
     sourceBlocks_.assign(sources_.size(), std::vector<float>(kMaxBlock * 2, 0.0f));
+    sourcePeaks_ = std::make_unique<std::atomic<float>[]>(sources_.size());
+    for (size_t i = 0; i < sources_.size(); ++i) sourcePeaks_[i].store(0.0f);
     mixBlock_.assign(kMaxBlock * 2, 0.0f);
 
     for (const auto& b : cfg_.buses) {
@@ -100,14 +102,19 @@ std::vector<BusStats> Mixer::busStats() {
 
 std::vector<SourceStats> Mixer::sourceStats() {
     std::vector<SourceStats> out;
-    for (auto& src : sources_) {
+    for (size_t i = 0; i < sources_.size(); ++i) {
+        auto& src = sources_[i];
         SourceStats s;
+        s.peak = sourcePeaks_[i].exchange(0.0f, std::memory_order_relaxed);
         s.name = src->config().name;
         s.state = src->state();
         s.bufferedFrames = src->ring().available();
         s.underruns = src->underruns();
         s.drops = src->drops();
         s.reconnects = src->reconnects();
+        s.sendRate = src->sendRate();
+        s.sendPpm = src->sendCorrectionPpm();
+        s.targetFrames = src->targetFrames();
         out.push_back(s);
     }
     return out;
@@ -165,8 +172,13 @@ void Mixer::threadMain() {
 }
 
 void Mixer::process(size_t frames) {
-    for (size_t i = 0; i < sources_.size(); ++i)
-        sources_[i]->pull(sourceBlocks_[i].data(), frames, targetFrames_);
+    for (size_t i = 0; i < sources_.size(); ++i) {
+        float* blk = sourceBlocks_[i].data();
+        sources_[i]->pull(blk, frames, targetFrames_);
+        float p = 0.0f;
+        for (size_t k = 0; k < frames * 2; ++k) p = std::max(p, std::fabs(blk[k]));
+        updatePeak(sourcePeaks_[i], p);
+    }
 
     for (auto& bus : buses_) {
         float* mix = mixBlock_.data();
