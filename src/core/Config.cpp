@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -166,6 +167,64 @@ bool loadConfig(const std::wstring& path, EngineConfig& out, std::string& error)
     }
     if (out.buses.empty()) {
         error = "nenhum [bus] definido";
+        return false;
+    }
+    return true;
+}
+
+const char* sourceTypeName(SourceType t) {
+    switch (t) {
+    case SourceType::Capture: return "capture";
+    case SourceType::Loopback: return "loopback";
+    case SourceType::App: return "app";
+    case SourceType::AppExclude: return "app_exclude";
+    }
+    return "capture";
+}
+
+bool saveConfig(const std::wstring& path, const EngineConfig& cfg, std::string& error) {
+    std::ostringstream o;
+    o << "# Configuração do NovaonFocus (gravada pela interface).\n"
+      << "# Rode \"novaonfocus devices\" e \"novaonfocus apps\" para ver os nomes certos.\n\n"
+      << "[engine]\nlatency_ms = " << cfg.latencyMs << "\n";
+    for (const auto& s : cfg.sources) {
+        o << "\n[source " << s.name << "]\ntype = " << sourceTypeName(s.type) << "\n";
+        if (s.type == SourceType::Capture || s.type == SourceType::Loopback)
+            o << "device = " << wideToUtf8(s.device.empty() ? L"default" : s.device) << "\n";
+        else
+            o << "exe = " << wideToUtf8(s.exe) << "\n";
+        if (s.type == SourceType::Capture)
+            o << "input_channel = "
+              << (s.inputChannel == 1 ? "1" : s.inputChannel == 2 ? "2" : "both") << "\n";
+    }
+    for (const auto& b : cfg.buses) {
+        o << "\n[bus " << b.name << "]\n";
+        for (const auto& [src, g] : b.gains) {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%.3f", g);
+            o << src << " = " << buf << "\n";
+        }
+    }
+
+    // Grava num temporário e troca, para não deixar o .ini pela metade.
+    const std::filesystem::path target(path);
+    std::filesystem::path tmp = target;
+    tmp += L".tmp";
+    {
+        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
+        if (!out) {
+            error = "não foi possível gravar o arquivo de configuração";
+            return false;
+        }
+        const std::string text = o.str();
+        out.write(text.data(), std::streamsize(text.size()));
+        if (!out) {
+            error = "erro ao gravar o arquivo de configuração";
+            return false;
+        }
+    }
+    if (!MoveFileExW(tmp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        error = "não foi possível substituir o arquivo de configuração";
         return false;
     }
     return true;

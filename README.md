@@ -43,7 +43,20 @@ Tipos de fonte:
 
 1. Baixe o `NovaonFocus-windows-x64` na aba **Actions** do GitHub (último build verde).
 2. Copie `novaonfocus-obs.dll` para `C:\Program Files\obs-studio\obs-plugins\64bit\`.
-3. Coloque `novaonfocus.exe` e `novaonfocus.ini` numa pasta sua.
+3. Coloque `novaonfocus-gui.exe`, `novaonfocus.exe` e `novaonfocus.ini` numa pasta sua.
+
+## Interface gráfica
+
+Dê duplo clique no **`novaonfocus-gui.exe`**. Ele lê e grava o mesmo `novaonfocus.ini` e liga o roteamento sozinho ao abrir.
+
+- **Mixer:** escolha o barramento no topo (`live`, `mic`...) e ajuste cada fonte no fader. Duplo clique no fader volta para 0 dB, a roda do mouse anda 1 dB, e o botão **MUDO** corta a fonte só naquele barramento. Fontes fora do barramento mostram **INCLUIR**. À direita fica o medidor da saída que vai para o OBS.
+- **Fontes:** cada fonte com estado (rodando, conectando, aguardando), nível e falhas. Clique para editar; o tipo, o dispositivo e o programa são escolhidos em listas, sem digitar nomes de cabeça.
+- **OBS:** passo a passo para ligar o plugin e botão para copiar o nome de cada barramento.
+- **Ajustes:** folga (latência), tabela de diagnóstico de falhas e travamentos, e atalho para a pasta do `.ini`.
+
+Volumes e mudos mudam na hora e são gravados sozinhos. Criar, apagar ou editar fontes e barramentos pede **APLICAR MUDANÇAS** na barra de baixo, que reinicia o motor (corte de cerca de 1 segundo). O botão redondo da barra de baixo liga e desliga o roteamento.
+
+O modo terminal (`novaonfocus.exe`) continua igual. Use um ou outro de cada vez, porque os dois escrevem nos mesmos barramentos.
 
 ## Uso
 
@@ -78,7 +91,7 @@ No OBS, adicione a fonte **NovaonFocus Bus** e digite o nome do barramento (`liv
 
 ## Compilar
 
-Precisa do Visual Studio 2022 e do CMake.
+Precisa do Visual Studio 2022 e do CMake. A interface baixa o Dear ImGui sozinha na configuração (desligue com `-DNOVAON_BUILD_GUI=OFF`).
 
 ```
 cmake -S . -B build -A x64
@@ -95,7 +108,7 @@ cmake -S . -B build -A x64 -DNOVAON_BUILD_OBS_PLUGIN=ON -DNOVAON_OBS_SOURCE_DIR=
 
 ## Próximos passos
 
-- Interface gráfica (Dear ImGui) com faders, medidores e matriz de roteamento.
+- Ícone na bandeja do sistema e iniciar junto com o Windows.
 - Barramento de monitoração tocando direto no fone da Scarlett.
 - Recarregar o `.ini` sem reiniciar.
 - Captura ASIO opcional para o microfone com o buffer mínimo.

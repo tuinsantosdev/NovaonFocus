@@ -47,6 +47,11 @@ struct EngineConfig {
 // Retorna false e preenche `error` se o arquivo for inválido.
 bool loadConfig(const std::wstring& path, EngineConfig& out, std::string& error);
 
+// Grava no mesmo formato que loadConfig lê. Retorna false se não conseguir.
+bool saveConfig(const std::wstring& path, const EngineConfig& cfg, std::string& error);
+
+const char* sourceTypeName(SourceType t); // "capture", "loopback", ...
+
 std::wstring utf8ToWide(const std::string& s);
 std::string wideToUtf8(const std::wstring& s);
 

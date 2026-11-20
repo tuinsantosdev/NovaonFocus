@@ -29,6 +29,7 @@ struct SourceStats {
     uint64_t underruns = 0;
     uint64_t drops = 0;
     uint64_t reconnects = 0;
+    float peak = 0.0f; // pico desde a última consulta (antes dos ganhos)
 };
 
 class Mixer {
@@ -69,6 +70,7 @@ private:
     std::vector<std::unique_ptr<WasapiSource>> sources_;
     std::vector<std::unique_ptr<Bus>> buses_;
     std::vector<std::vector<float>> sourceBlocks_;
+    std::unique_ptr<std::atomic<float>[]> sourcePeaks_;
     std::vector<float> mixBlock_;
     std::thread thread_;
     std::atomic<bool> running_{false};

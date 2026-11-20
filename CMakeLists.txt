@@ -9,6 +9,7 @@ if(NOT WIN32)
 endif()
 
 option(NOVAON_BUILD_OBS_PLUGIN "Compila o plugin do OBS (precisa do libobs)" OFF)
+option(NOVAON_BUILD_GUI "Compila a interface gráfica (baixa o Dear ImGui)" ON)
 
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
 if(MSVC)
@@ -33,6 +34,40 @@ if(MINGW)
 endif()
 
 install(TARGETS novaonfocus RUNTIME DESTINATION .)
+
+# Interface gráfica: novaonfocus-gui.exe (Win32 + Direct3D 11 + Dear ImGui).
+if(NOVAON_BUILD_GUI)
+  include(FetchContent)
+  FetchContent_Declare(imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG v1.91.5
+    GIT_SHALLOW TRUE)
+  FetchContent_MakeAvailable(imgui)
+
+  add_executable(novaonfocus-gui WIN32
+    src/gui/main.cpp
+    src/gui/App.cpp
+    src/gui/Theme.cpp
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
+  )
+  target_include_directories(novaonfocus-gui PRIVATE ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+  target_link_libraries(novaonfocus-gui PRIVATE novaon_core d3d11 dxgi d3dcompiler dwmapi shell32)
+  # O código do ImGui não precisa passar no /W4 do projeto.
+  set_source_files_properties(
+    ${imgui_SOURCE_DIR}/imgui.cpp ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp ${imgui_SOURCE_DIR}/backends/imgui_impl_dx11.cpp
+    PROPERTIES COMPILE_OPTIONS "$<IF:$<CXX_COMPILER_ID:MSVC>,/W0,-w>")
+  if(MINGW)
+    target_link_options(novaonfocus-gui PRIVATE -municode -static)
+  endif()
+  install(TARGETS novaonfocus-gui RUNTIME DESTINATION .)
+endif()
 install(FILES config/novaonfocus.ini DESTINATION .)
 
 if(NOVAON_BUILD_OBS_PLUGIN)
