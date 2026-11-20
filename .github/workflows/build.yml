@@ -40,6 +40,13 @@ jobs:
         working-directory: build/vst-plugin/Release
         run: ./send_smoke.exe novaonfocus-send.vst3
 
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: send-view-preview
+          path: build/vst-plugin/Release/send_view.bmp
+          if-no-files-found: ignore
+
       - name: Empacotar
         run: cmake --install build --config Release --prefix dist
 

@@ -12,7 +12,9 @@
 
 #include "pluginterfaces/base/ipluginbase.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
+#include "pluginterfaces/gui/iplugview.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
+#include "pluginterfaces/vst/ivsteditcontroller.h"
 
 #include <cmath>
 #include <cstdio>
@@ -55,6 +57,34 @@ int wmain(int argc, wchar_t** argv) {
     if (proc->setupProcessing(setup) != kResultOk) return fail("setupProcessing");
     comp->setActive(true);
     proc->setProcessing(true);
+
+    // Parâmetro de canal visível e automatizável.
+    Vst::IEditController* ctrl = nullptr;
+    if (comp->queryInterface(Vst::IEditController::iid, reinterpret_cast<void**>(&ctrl)) != kResultOk)
+        return fail("IEditController");
+    Vst::ParameterInfo pinfo{};
+    if (ctrl->getParameterCount() != 1 || ctrl->getParameterInfo(0, pinfo) != kResultOk ||
+        !(pinfo.flags & Vst::ParameterInfo::kCanAutomate) || pinfo.stepCount != 7)
+        return fail("parâmetro Canal");
+
+    // Janela do plugin presa numa janela nossa, como a DAW faz.
+    IPlugView* view = ctrl->createView(Vst::ViewType::kEditor);
+    if (!view) return fail("o plugin não tem janela");
+    if (view->isPlatformTypeSupported(kPlatformTypeHWND) != kResultTrue) return fail("HWND");
+    ViewRect vr;
+    view->getSize(&vr);
+    HWND host = CreateWindowExW(0, L"STATIC", L"host", WS_POPUP, 0, 0, vr.getWidth(), vr.getHeight(),
+                                nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (view->attached(host, kPlatformTypeHWND) != kResultOk) return fail("attached");
+    HWND child = FindWindowExW(host, nullptr, L"NovaonFocusSendView", nullptr);
+    if (!child) return fail("janela do plugin não foi criada");
+    auto pump = [] {
+        MSG m;
+        while (PeekMessageW(&m, nullptr, 0, 0, PM_REMOVE)) {
+            TranslateMessage(&m);
+            DispatchMessageW(&m);
+        }
+    };
 
     // Mixer com a fonte "send" no canal 1.
     const wchar_t* cfgPath = L"send_smoke.ini";
@@ -101,7 +131,38 @@ int wmain(int argc, wchar_t** argv) {
             if (proc->process(data) != kResultOk) return fail("process");
             if (ol[100] != l[100]) return fail("o plugin não deixou o som passar");
         }
+        pump();
         Sleep(1);
+    }
+
+    // Foto da janela do plugin (vai como artefato do CI).
+    {
+        HDC screen = GetDC(nullptr);
+        HDC mem = CreateCompatibleDC(screen);
+        BITMAPINFO bi{};
+        bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+        bi.bmiHeader.biWidth = vr.getWidth();
+        bi.bmiHeader.biHeight = vr.getHeight();
+        bi.bmiHeader.biPlanes = 1;
+        bi.bmiHeader.biBitCount = 32;
+        void* bits = nullptr;
+        HBITMAP bmp = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+        HGDIOBJ old = SelectObject(mem, bmp);
+        SendMessageW(child, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(mem), PRF_CLIENT);
+        GdiFlush();
+        const DWORD imgBytes = DWORD(vr.getWidth() * vr.getHeight() * 4);
+        BITMAPFILEHEADER fh{};
+        fh.bfType = 0x4D42;
+        fh.bfOffBits = sizeof(fh) + sizeof(bi.bmiHeader);
+        fh.bfSize = fh.bfOffBits + imgBytes;
+        std::ofstream img("send_view.bmp", std::ios::binary);
+        img.write(reinterpret_cast<const char*>(&fh), sizeof(fh));
+        img.write(reinterpret_cast<const char*>(&bi.bmiHeader), sizeof(bi.bmiHeader));
+        img.write(static_cast<const char*>(bits), imgBytes);
+        SelectObject(mem, old);
+        DeleteObject(bmp);
+        DeleteDC(mem);
+        ReleaseDC(nullptr, screen);
     }
 
     // Confere o envio na memória compartilhada.
@@ -110,6 +171,7 @@ int wmain(int argc, wchar_t** argv) {
     auto* sh = static_cast<novaon::SharedBusHeader*>(MapViewOfFile(sendMap, FILE_MAP_READ, 0, 0, novaon::sharedBusBytes()));
     std::printf("envio: %u Hz, %llu quadros escritos\n", sh->sampleRate, (unsigned long long)sh->writeFrames.load());
     if (sh->sampleRate != 44100 || sh->writeFrames.load() != t) return fail("cabeçalho do envio");
+    if (sh->readerTick == 0 || GetTickCount() - sh->readerTick > 1000) return fail("o app não marcou presença");
 
     // Confere o bus: pico perto de 0,5 e frequência perto de 1 kHz.
     HANDLE busMap = OpenFileMappingW(FILE_MAP_READ, FALSE, novaon::sharedBusName(L"smoke").c_str());
@@ -130,6 +192,10 @@ int wmain(int argc, wchar_t** argv) {
     std::printf("bus: pico %.3f, %d ciclos em 500 ms, buffer da fonte %.1f ms\n", peak, crossings,
                 stats[0].bufferedFrames * 1000.0 / 48000.0);
     mixer.stop();
+    view->removed();
+    view->release();
+    DestroyWindow(host);
+    ctrl->release();
     proc->setProcessing(false);
     comp->setActive(false);
     comp->terminate();

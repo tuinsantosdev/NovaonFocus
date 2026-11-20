@@ -15,6 +15,7 @@ set(sdk "${NOVAON_VST3_SDK_DIR}")
 
 add_library(novaonfocus-send MODULE
   novaonfocus-send.cpp
+  SendEditor.cpp
   ${sdk}/base/source/baseiids.cpp
   ${sdk}/base/source/fbuffer.cpp
   ${sdk}/base/source/fdebug.cpp
@@ -42,6 +43,7 @@ add_library(novaonfocus-send MODULE
 )
 target_include_directories(novaonfocus-send PRIVATE "${sdk}" "${PROJECT_SOURCE_DIR}/src/core")
 target_compile_definitions(novaonfocus-send PRIVATE RELEASE=1)
+target_link_libraries(novaonfocus-send PRIVATE gdiplus)
 # Um .vst3 de arquivo único é uma DLL com outra extensão.
 set_target_properties(novaonfocus-send PROPERTIES PREFIX "" SUFFIX ".vst3")
 if(MSVC)

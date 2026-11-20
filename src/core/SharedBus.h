@@ -30,7 +30,9 @@ struct SharedBusHeader {
     uint32_t sampleRate;
     uint32_t channels;
     uint32_t capacityFrames;
-    uint32_t reserved;
+    // GetTickCount() da última vez que um leitor (o app, numa fonte "send")
+    // olhou este bloco. O plugin VST3 usa para mostrar "conectado".
+    uint32_t readerTick;
     // Total de quadros já escritos desde a criação (monotônico).
     alignas(8) std::atomic<uint64_t> writeFrames;
     // GetTickCount64() da última escrita: o leitor detecta app parado.
@@ -91,7 +93,7 @@ public:
             header_->sampleRate = sampleRate;
             header_->channels = kBusChannels;
             header_->capacityFrames = kBusCapacityFrames;
-            header_->reserved = 0;
+            header_->readerTick = 0;
             header_->writeFrames.store(0, std::memory_order_relaxed);
             header_->heartbeatMs.store(GetTickCount64(), std::memory_order_relaxed);
             std::atomic_thread_fence(std::memory_order_release);
@@ -111,6 +113,13 @@ public:
         }
         header_->writeFrames.store(w + frames, std::memory_order_release);
         header_->heartbeatMs.store(GetTickCount64(), std::memory_order_relaxed);
+    }
+
+    // true se algum leitor marcou presença no último segundo.
+    bool readerAlive() const {
+        if (!header_) return false;
+        const uint32_t t = *reinterpret_cast<volatile const uint32_t*>(&header_->readerTick);
+        return t != 0 && GetTickCount() - t < 1000;
     }
 
     void close() {
