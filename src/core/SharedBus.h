@@ -30,7 +30,9 @@ struct SharedBusHeader {
     uint32_t sampleRate;
     uint32_t channels;
     uint32_t capacityFrames;
-    uint32_t reserved;
+    // GetTickCount() da última vez que um leitor (o app, numa fonte "send")
+    // olhou este bloco. O plugin VST3 usa para mostrar "conectado".
+    uint32_t readerTick;
     // Total de quadros já escritos desde a criação (monotônico).
     alignas(8) std::atomic<uint64_t> writeFrames;
     // GetTickCount64() da última escrita: o leitor detecta app parado.
@@ -46,11 +48,18 @@ inline std::wstring sharedBusName(const std::wstring& bus) {
     return L"Local\\NovaonFocus.Bus." + bus;
 }
 
+// Canal de envio do plugin VST3 "NovaonFocus Send" (1 a 8). O plugin escreve
+// na taxa da DAW (sampleRate no header) e o app reamostra para 48 kHz.
+constexpr int kSendChannels = 8;
+inline std::wstring sharedSendName(int channel) {
+    return L"Local\\NovaonFocus.Send." + std::to_wstring(channel);
+}
+
 inline float* sharedBusData(SharedBusHeader* h) {
     return reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(h) + kBusHeaderBytes);
 }
 
-// Lado escritor (app).
+// Lado escritor (app para os barramentos, plugin VST3 para os envios).
 class SharedBusWriter {
 public:
     SharedBusWriter() = default;
@@ -58,12 +67,14 @@ public:
     SharedBusWriter& operator=(const SharedBusWriter&) = delete;
     ~SharedBusWriter() { close(); }
 
-    bool open(const std::wstring& bus) {
+    bool open(const std::wstring& bus) { return openNamed(sharedBusName(bus), kBusSampleRate); }
+
+    bool openNamed(const std::wstring& fullName, uint32_t sampleRate) {
         close();
         const size_t bytes = sharedBusBytes();
         mapping_ = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
                                       0, static_cast<DWORD>(bytes),
-                                      sharedBusName(bus).c_str());
+                                      fullName.c_str());
         if (!mapping_) return false;
         const bool existed = GetLastError() == ERROR_ALREADY_EXISTS;
         void* view = MapViewOfFile(mapping_, FILE_MAP_ALL_ACCESS, 0, 0, bytes);
@@ -73,15 +84,16 @@ public:
         // continuamos do mesmo contador para o leitor não se perder.
         const bool reusable = existed && header_->magic == kBusMagic &&
                               header_->version == kBusVersion &&
+                              header_->sampleRate == sampleRate &&
                               header_->capacityFrames == kBusCapacityFrames &&
                               header_->channels == kBusChannels;
         if (!reusable) {
             header_->magic = 0;
             header_->version = kBusVersion;
-            header_->sampleRate = kBusSampleRate;
+            header_->sampleRate = sampleRate;
             header_->channels = kBusChannels;
             header_->capacityFrames = kBusCapacityFrames;
-            header_->reserved = 0;
+            header_->readerTick = 0;
             header_->writeFrames.store(0, std::memory_order_relaxed);
             header_->heartbeatMs.store(GetTickCount64(), std::memory_order_relaxed);
             std::atomic_thread_fence(std::memory_order_release);
@@ -101,6 +113,15 @@ public:
         }
         header_->writeFrames.store(w + frames, std::memory_order_release);
         header_->heartbeatMs.store(GetTickCount64(), std::memory_order_relaxed);
+    }
+
+    // true se algum leitor marcou presença no último segundo.
+    bool readerAlive() const {
+        if (!header_) return false;
+        const uint32_t t = *reinterpret_cast<volatile const uint32_t*>(&header_->readerTick);
+        // Diferença com sinal: o leitor grava GetTickCount() | 1, que pode
+        // ficar 1 ms "no futuro" e não pode virar um número enorme.
+        return t != 0 && int32_t(GetTickCount() - t) < 1000;
     }
 
     void close() {

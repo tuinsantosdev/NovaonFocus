@@ -29,8 +29,10 @@ void updatePeak(std::atomic<float>& peak, float v) {
 Mixer::Mixer(const EngineConfig& cfg)
     : cfg_(cfg), targetFrames_(size_t(cfg.latencyMs) * kBusSampleRate / 1000) {
     // Buffer de cada fonte: 500 ms, bem acima da folga, para absorver engasgos.
-    for (const auto& s : cfg_.sources)
+    for (const auto& s : cfg_.sources) {
         sources_.push_back(std::make_unique<WasapiSource>(s, kBusSampleRate / 2));
+        sources_.back()->setTargetFrames(targetFrames_);
+    }
     sourceBlocks_.assign(sources_.size(), std::vector<float>(kMaxBlock * 2, 0.0f));
     mixBlock_.assign(kMaxBlock * 2, 0.0f);
 

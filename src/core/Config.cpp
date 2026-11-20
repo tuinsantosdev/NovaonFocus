@@ -121,6 +121,7 @@ bool loadConfig(const std::wstring& path, EngineConfig& out, std::string& error)
                 else if (v == "loopback") s.type = SourceType::Loopback;
                 else if (v == "app") s.type = SourceType::App;
                 else if (v == "app_exclude") s.type = SourceType::AppExclude;
+                else if (v == "send") s.type = SourceType::Send;
                 else return fail("type inválido: " + value);
             } else if (key == "device") {
                 s.device = utf8ToWide(value);
@@ -132,6 +133,9 @@ bool loadConfig(const std::wstring& path, EngineConfig& out, std::string& error)
                 else if (v == "2") s.inputChannel = 2;
                 else if (v == "both") s.inputChannel = 0;
                 else return fail("input_channel deve ser 1, 2 ou both");
+            } else if (key == "channel") {
+                s.sendChannel = std::atoi(value.c_str());
+                if (s.sendChannel < 1 || s.sendChannel > 8) return fail("channel deve ser de 1 a 8");
             } else {
                 return fail("chave desconhecida em [source]: " + key);
             }

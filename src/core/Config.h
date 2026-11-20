@@ -5,13 +5,17 @@
 // latency_ms = 20
 //
 // [source mic]
-// type = capture        ; capture | loopback | app | app_exclude
+// type = capture        ; capture | loopback | app | app_exclude | send
 // device = Focusrite    ; trecho do nome do dispositivo, ou "default"
 // input_channel = 1     ; 1, 2 ou both (só para capture)
 //
 // [source jogo]
 // type = app
 // exe = game.exe
+//
+// [source daw]
+// type = send           ; plugin VST3 "NovaonFocus Send" na DAW
+// channel = 1
 //
 // [bus live]
 // mic = 1.0
@@ -23,7 +27,7 @@
 
 namespace novaon {
 
-enum class SourceType { Capture, Loopback, App, AppExclude };
+enum class SourceType { Capture, Loopback, App, AppExclude, Send };
 
 struct SourceConfig {
     std::string name;
@@ -31,6 +35,7 @@ struct SourceConfig {
     std::wstring device = L"default"; // capture/loopback
     std::wstring exe;                 // app/app_exclude
     int inputChannel = 0;             // 0 = both, 1 = esquerda, 2 = direita
+    int sendChannel = 1;              // send: canal do plugin VST3 (1 a 8)
 };
 
 struct BusConfig {
