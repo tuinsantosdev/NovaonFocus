@@ -12,10 +12,12 @@
 // com um #define e os outros headers do SDK precisam ver o nome já trocado.
 #include "public.sdk/source/vst/vstsinglecomponenteffect.h"
 
+#include "SendEditor.h"
 #include "SharedBus.h"
 
 #include "base/source/fstreamer.h"
 #include "pluginterfaces/base/ibstream.h"
+#include "pluginterfaces/gui/iplugview.h"
 #include "pluginterfaces/vst/ivstparameterchanges.h"
 #include "pluginterfaces/vst/vsttypes.h"
 #include "public.sdk/source/main/pluginfactory.h"
@@ -24,6 +26,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <vector>
 
 using namespace Steinberg;
@@ -44,7 +47,7 @@ Vst::ParamValue normalizedFromChannel(int ch) {
     return double(ch - 1) / double(novaon::kSendChannels - 1);
 }
 
-class SendEffect : public Vst::SingleComponentEffect {
+class SendEffect : public Vst::SingleComponentEffect, public novaon::SendViewModel {
 public:
     static FUnknown* createInstance(void*) {
         return static_cast<Vst::IAudioProcessor*>(new SendEffect());
@@ -57,8 +60,10 @@ public:
         addAudioInput(STR16("Entrada"), Vst::SpeakerArr::kStereo);
         addAudioOutput(STR16("Saída"), Vst::SpeakerArr::kStereo);
 
+        // kCanAutomate faz o canal aparecer também na lista genérica de
+        // parâmetros da DAW (Browse parameters no FL Studio).
         auto* list = new Vst::StringListParameter(STR16("Canal"), kChannelParam, nullptr,
-                                                  Vst::ParameterInfo::kIsList);
+                                                  Vst::ParameterInfo::kCanAutomate | Vst::ParameterInfo::kIsList);
         list->appendString(STR16("Canal 1"));
         list->appendString(STR16("Canal 2"));
         list->appendString(STR16("Canal 3"));
@@ -117,6 +122,9 @@ public:
         // Reabrir a memória só acontece quando o canal muda (raro).
         if (channel_.load() != openChannel_) openWriter();
 
+        lastProcessTick_.store(GetTickCount());
+        connected_.store(writer_.readerAlive());
+
         if (data.numSamples <= 0 || data.numInputs < 1 || data.numOutputs < 1) return kResultOk;
         Vst::AudioBusBuffers& in = data.inputs[0];
         Vst::AudioBusBuffers& out = data.outputs[0];
@@ -134,11 +142,18 @@ public:
         const float* r = in.channelBuffers32[1];
         const size_t frames = std::min(size_t(n), scratch_.size() / 2);
         const bool silent = (in.silenceFlags & 3) == 3;
+        float pl = 0.0f, pr = 0.0f;
         for (size_t i = 0; i < frames; ++i) {
-            scratch_[i * 2] = silent ? 0.0f : l[i];
-            scratch_[i * 2 + 1] = silent ? 0.0f : r[i];
+            const float a = silent ? 0.0f : l[i];
+            const float b = silent ? 0.0f : r[i];
+            scratch_[i * 2] = a;
+            scratch_[i * 2 + 1] = b;
+            pl = std::max(pl, std::fabs(a));
+            pr = std::max(pr, std::fabs(b));
         }
         writer_.write(scratch_.data(), frames);
+        raisePeak(peak_[0], pl);
+        raisePeak(peak_[1], pr);
         return kResultOk;
     }
 
@@ -162,7 +177,32 @@ public:
         return SingleComponentEffect::setParamNormalized(tag, value);
     }
 
+    IPlugView* PLUGIN_API createView(FIDString name) override {
+        if (name && std::strcmp(name, Vst::ViewType::kEditor) == 0) return novaon::createSendView(this);
+        return nullptr;
+    }
+
+    // --- SendViewModel (thread da interface) ---
+    int channel() const override { return channel_.load(); }
+    void requestChannel(int ch) override {
+        const Vst::ParamValue v = normalizedFromChannel(ch);
+        // Avisa a DAW (para salvar no projeto e mandar ao processamento).
+        beginEdit(kChannelParam);
+        setParamNormalized(kChannelParam, v);
+        performEdit(kChannelParam, v);
+        endEdit(kChannelParam);
+    }
+    float takePeak(int side) override { return peak_[side & 1].exchange(0.0f); }
+    uint32_t sampleRate() const override { return sampleRate_; }
+    bool appConnected() const override { return connected_.load(); }
+    bool dawProcessing() const override { return GetTickCount() - lastProcessTick_.load() < 500; }
+
 private:
+    static void raisePeak(std::atomic<float>& p, float v) {
+        float cur = p.load(std::memory_order_relaxed);
+        while (v > cur && !p.compare_exchange_weak(cur, v, std::memory_order_relaxed)) {}
+    }
+
     void openWriter() {
         const int ch = channel_.load();
         writer_.openNamed(novaon::sharedSendName(ch), sampleRate_);
@@ -174,6 +214,9 @@ private:
     uint32_t sampleRate_ = 48000;
     std::atomic<int> channel_{1};
     int openChannel_ = 0;
+    std::atomic<float> peak_[2] = {0.0f, 0.0f};
+    std::atomic<uint32_t> lastProcessTick_{0};
+    std::atomic<bool> connected_{false};
 };
 
 } // namespace

@@ -338,9 +338,10 @@ bool WasapiSource::runOnce() {
 }
 
 bool WasapiSource::runSend() {
-    HANDLE mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, sharedSendName(cfg_.sendChannel).c_str());
+    // Escrita só para marcar presença (readerTick); o áudio é só lido.
+    HANDLE mapping = OpenFileMappingW(FILE_MAP_READ | FILE_MAP_WRITE, FALSE, sharedSendName(cfg_.sendChannel).c_str());
     if (!mapping) return false; // plugin ainda não foi carregado na DAW
-    auto* header = static_cast<SharedBusHeader*>(MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, sharedBusBytes()));
+    auto* header = static_cast<SharedBusHeader*>(MapViewOfFile(mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sharedBusBytes()));
     if (!header) {
         CloseHandle(mapping);
         return false;
@@ -367,6 +368,7 @@ bool WasapiSource::runSend() {
         due.QuadPart = -10000; // 1 ms
         SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
         WaitForSingleObject(timer, 20);
+        InterlockedExchange(reinterpret_cast<volatile LONG*>(&header->readerTick), LONG(GetTickCount() | 1));
 
         const uint32_t rate = header->sampleRate;
         const bool valid = header->magic == kBusMagic && header->version == kBusVersion &&
