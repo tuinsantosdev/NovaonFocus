@@ -8,7 +8,6 @@
 #endif
 #include <windows.h>
 #include <audiopolicy.h>
-#include <functiondiscoverykeys_devpkey.h>
 #include <mmdeviceapi.h>
 #include <tlhelp32.h>
 
