@@ -10,6 +10,7 @@ endif()
 
 option(NOVAON_BUILD_OBS_PLUGIN "Compila o plugin do OBS (precisa do libobs)" OFF)
 option(NOVAON_BUILD_GUI "Compila a interface gráfica (baixa o Dear ImGui)" ON)
+option(NOVAON_BUILD_VST "Compila o plugin VST3 NovaonFocus Send (precisa do vst3sdk)" OFF)
 
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
 if(MSVC)
@@ -31,6 +32,12 @@ add_executable(novaonfocus src/app/main.cpp)
 target_link_libraries(novaonfocus PRIVATE novaon_core)
 if(MINGW)
   target_link_options(novaonfocus PRIVATE -municode -static)
+endif()
+
+add_executable(resampler_test tests/resampler_test.cpp)
+target_include_directories(resampler_test PRIVATE src/core)
+if(MINGW)
+  target_link_options(resampler_test PRIVATE -static)
 endif()
 
 install(TARGETS novaonfocus RUNTIME DESTINATION .)
@@ -72,4 +79,8 @@ install(FILES config/novaonfocus.ini DESTINATION .)
 
 if(NOVAON_BUILD_OBS_PLUGIN)
   add_subdirectory(obs-plugin)
+endif()
+
+if(NOVAON_BUILD_VST)
+  add_subdirectory(vst-plugin)
 endif()

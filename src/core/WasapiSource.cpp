@@ -1,6 +1,7 @@
 #include "WasapiSource.h"
 
 #include "AudioDevices.h"
+#include "Resampler.h"
 #include "SharedBus.h"
 
 #include <audioclient.h>
@@ -217,6 +218,8 @@ void WasapiSource::threadMain() {
 }
 
 bool WasapiSource::runOnce() {
+    if (cfg_.type == SourceType::Send) return runSend();
+
     IMMDevice* device = nullptr;
     IAudioClient* client = nullptr;
     IAudioCaptureClient* capture = nullptr;
@@ -332,6 +335,88 @@ bool WasapiSource::runOnce() {
 
     cleanup();
     return ok;
+}
+
+bool WasapiSource::runSend() {
+    HANDLE mapping = OpenFileMappingW(FILE_MAP_READ, FALSE, sharedSendName(cfg_.sendChannel).c_str());
+    if (!mapping) return false; // plugin ainda não foi carregado na DAW
+    auto* header = static_cast<SharedBusHeader*>(MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, sharedBusBytes()));
+    if (!header) {
+        CloseHandle(mapping);
+        return false;
+    }
+
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+#define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+    HANDLE timer = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    if (!timer) timer = CreateWaitableTimerW(nullptr, FALSE, nullptr);
+
+    AdaptiveResampler resampler;
+    std::vector<float> in(1024 * 2);
+    std::vector<float> out;
+    out.reserve(8192);
+    uint64_t readPos = 0;
+    bool synced = false;
+    double fill = double(targetFrames_);
+    const float* data = sharedBusData(header);
+    state_ = SourceState::Waiting;
+
+    while (running_.load()) {
+        LARGE_INTEGER due;
+        due.QuadPart = -10000; // 1 ms
+        SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE);
+        WaitForSingleObject(timer, 20);
+
+        const uint32_t rate = header->sampleRate;
+        const bool valid = header->magic == kBusMagic && header->version == kBusVersion &&
+                           header->channels == kBusChannels &&
+                           header->capacityFrames == kBusCapacityFrames && rate >= 8000;
+        // Sem escrita há 250 ms: DAW fechada, plugin removido ou áudio parado.
+        const bool alive = valid && GetTickCount64() - header->heartbeatMs.load(std::memory_order_relaxed) < 250;
+        if (!alive) {
+            state_ = SourceState::Waiting;
+            synced = false;
+            continue;
+        }
+
+        const uint64_t w = header->writeFrames.load(std::memory_order_acquire);
+        if (!synced || w < readPos || w - readPos > kBusCapacityFrames / 2) {
+            // Começa do presente: nunca toca áudio velho acumulado.
+            readPos = w;
+            resampler.reset();
+            fill = double(targetFrames_);
+            synced = true;
+        }
+        state_ = SourceState::Running;
+
+        // Controle de deriva: mede quanto o buffer desta fonte está cheio em
+        // relação à folga desejada e ajusta a razão em até ±0,5%. Assim o
+        // atraso fica parado no alvo em vez de crescer com o tempo.
+        fill = fill * 0.99 + double(ring_.available()) * 0.01;
+        const double target = double(targetFrames_ + 96);
+        double err = (fill - target) / target;
+        err = std::clamp(err, -1.0, 1.0);
+        const double step = double(rate) / double(kBusSampleRate) * (1.0 + 0.005 * err);
+
+        while (readPos < w) {
+            const size_t n = size_t(std::min<uint64_t>(w - readPos, 1024));
+            for (size_t i = 0; i < n; ++i) {
+                const size_t slot = size_t((readPos + i) % kBusCapacityFrames);
+                in[i * 2] = data[slot * 2];
+                in[i * 2 + 1] = data[slot * 2 + 1];
+            }
+            readPos += n;
+            out.clear();
+            resampler.process(in.data(), n, step, out);
+            if (!out.empty()) ring_.write(out.data(), out.size() / 2);
+        }
+    }
+
+    if (timer) CloseHandle(timer);
+    UnmapViewOfFile(header);
+    CloseHandle(mapping);
+    return true;
 }
 
 void WasapiSource::pull(float* out, size_t frames, size_t targetFrames) {
