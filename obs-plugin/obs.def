@@ -1,0 +1,13 @@
+; Funções do obs.dll que o plugin usa. Gerar a lib de importação a partir
+; daqui evita compilar o OBS inteiro só para linkar o plugin.
+LIBRARY obs
+EXPORTS
+  blog
+  obs_data_get_string
+  obs_data_set_default_string
+  obs_properties_add_text
+  obs_properties_create
+  obs_register_source_s
+  obs_source_output_audio
+  os_gettime_ns
+  os_sleep_ms
