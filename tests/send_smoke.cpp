@@ -135,6 +135,32 @@ int wmain(int argc, wchar_t** argv) {
         Sleep(1);
     }
 
+    // Confere o envio na memória compartilhada.
+    HANDLE sendMap = OpenFileMappingW(FILE_MAP_READ, FALSE, novaon::sharedSendName(1).c_str());
+    if (!sendMap) return fail("memória do envio não existe");
+    auto* sh = static_cast<novaon::SharedBusHeader*>(MapViewOfFile(sendMap, FILE_MAP_READ, 0, 0, novaon::sharedBusBytes()));
+    std::printf("envio: %u Hz, %llu quadros escritos\n", sh->sampleRate, (unsigned long long)sh->writeFrames.load());
+    if (sh->sampleRate != 44100 || sh->writeFrames.load() != t) return fail("cabeçalho do envio");
+    if (sh->readerTick == 0 || GetTickCount() - sh->readerTick > 1000) return fail("o app não marcou presença");
+
+    // Confere o bus: pico perto de 0,5 e frequência perto de 1 kHz.
+    HANDLE busMap = OpenFileMappingW(FILE_MAP_READ, FALSE, novaon::sharedBusName(L"smoke").c_str());
+    if (!busMap) return fail("memória do bus não existe");
+    auto* bh = static_cast<novaon::SharedBusHeader*>(MapViewOfFile(busMap, FILE_MAP_READ, 0, 0, novaon::sharedBusBytes()));
+    const uint64_t w = bh->writeFrames.load();
+    const float* bd = novaon::sharedBusData(bh);
+    float peak = 0.0f;
+    int crossings = 0;
+    float prev = 0.0f;
+    for (uint64_t i = w - 24000; i < w; ++i) { // últimos 500 ms
+        const float v = bd[(i % novaon::kBusCapacityFrames) * 2];
+        peak = std::max(peak, std::fabs(v));
+        if (prev < 0.0f && v >= 0.0f) ++crossings;
+        prev = v;
+    }
+    const auto stats = mixer.sourceStats();
+    std::printf("bus: pico %.3f, %d ciclos em 500 ms, buffer da fonte %.1f ms\n", peak, crossings,
+                stats[0].bufferedFrames * 1000.0 / 48000.0);
     // Foto da janela do plugin (vai como artefato do CI).
     {
         HDC screen = GetDC(nullptr);
@@ -165,32 +191,6 @@ int wmain(int argc, wchar_t** argv) {
         ReleaseDC(nullptr, screen);
     }
 
-    // Confere o envio na memória compartilhada.
-    HANDLE sendMap = OpenFileMappingW(FILE_MAP_READ, FALSE, novaon::sharedSendName(1).c_str());
-    if (!sendMap) return fail("memória do envio não existe");
-    auto* sh = static_cast<novaon::SharedBusHeader*>(MapViewOfFile(sendMap, FILE_MAP_READ, 0, 0, novaon::sharedBusBytes()));
-    std::printf("envio: %u Hz, %llu quadros escritos\n", sh->sampleRate, (unsigned long long)sh->writeFrames.load());
-    if (sh->sampleRate != 44100 || sh->writeFrames.load() != t) return fail("cabeçalho do envio");
-    if (sh->readerTick == 0 || GetTickCount() - sh->readerTick > 1000) return fail("o app não marcou presença");
-
-    // Confere o bus: pico perto de 0,5 e frequência perto de 1 kHz.
-    HANDLE busMap = OpenFileMappingW(FILE_MAP_READ, FALSE, novaon::sharedBusName(L"smoke").c_str());
-    if (!busMap) return fail("memória do bus não existe");
-    auto* bh = static_cast<novaon::SharedBusHeader*>(MapViewOfFile(busMap, FILE_MAP_READ, 0, 0, novaon::sharedBusBytes()));
-    const uint64_t w = bh->writeFrames.load();
-    const float* bd = novaon::sharedBusData(bh);
-    float peak = 0.0f;
-    int crossings = 0;
-    float prev = 0.0f;
-    for (uint64_t i = w - 24000; i < w; ++i) { // últimos 500 ms
-        const float v = bd[(i % novaon::kBusCapacityFrames) * 2];
-        peak = std::max(peak, std::fabs(v));
-        if (prev < 0.0f && v >= 0.0f) ++crossings;
-        prev = v;
-    }
-    const auto stats = mixer.sourceStats();
-    std::printf("bus: pico %.3f, %d ciclos em 500 ms, buffer da fonte %.1f ms\n", peak, crossings,
-                stats[0].bufferedFrames * 1000.0 / 48000.0);
     mixer.stop();
     view->removed();
     view->release();
