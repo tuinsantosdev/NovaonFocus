@@ -112,6 +112,9 @@ std::vector<SourceStats> Mixer::sourceStats() {
         s.underruns = src->underruns();
         s.drops = src->drops();
         s.reconnects = src->reconnects();
+        s.sendRate = src->sendRate();
+        s.sendPpm = src->sendCorrectionPpm();
+        s.targetFrames = src->targetFrames();
         out.push_back(s);
     }
     return out;

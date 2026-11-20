@@ -30,6 +30,11 @@ struct SourceStats {
     uint64_t drops = 0;
     uint64_t reconnects = 0;
     float peak = 0.0f; // pico desde a última consulta (antes dos ganhos)
+    // Fontes "send": taxa da DAW (0 = plugin desconectado), correção de
+    // relógio em ppm e a folga alvo do buffer, em quadros de 48 kHz.
+    uint32_t sendRate = 0;
+    float sendPpm = 0.0f;
+    size_t targetFrames = 0;
 };
 
 class Mixer {

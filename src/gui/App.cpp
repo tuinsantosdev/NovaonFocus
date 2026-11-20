@@ -60,6 +60,7 @@ const char* typeLabel(SourceType t) {
     case SourceType::Loopback: return "Tudo o que toca numa saída";
     case SourceType::App: return "Só um programa";
     case SourceType::AppExclude: return "Tudo, menos um programa";
+    case SourceType::Send: return "O que o plugin VST3 NovaonFocus Send manda da DAW (funciona no ASIO)";
     }
     return "";
 }
@@ -111,6 +112,17 @@ void drawIcon(ImDrawList* dl, int kind, ImVec2 c, float s, ImU32 color) {
         dl->PathArcTo(ImVec2(c.x + s * 0.06f, c.y), s * 0.32f, -IM_PI * 0.3f, IM_PI * 0.3f, 10);
         dl->PathStroke(color, 0, t);
         break;
+    case 6: { // send da DAW: onda saindo
+        const float xs[] = {-0.42f, -0.28f, -0.14f, 0.0f, 0.14f};
+        const float ys[] = {0.0f, -0.3f, 0.3f, -0.18f, 0.0f};
+        for (int i = 0; i < 4; ++i)
+            dl->AddLine(ImVec2(c.x + xs[i] * s, c.y + ys[i] * s), ImVec2(c.x + xs[i + 1] * s, c.y + ys[i + 1] * s),
+                        color, t);
+        dl->AddLine(ImVec2(c.x + 0.2f * s, c.y), ImVec2(c.x + 0.42f * s, c.y), color, t);
+        dl->AddTriangleFilled(ImVec2(c.x + 0.3f * s, c.y - 0.13f * s), ImVec2(c.x + 0.3f * s, c.y + 0.13f * s),
+                              ImVec2(c.x + 0.46f * s, c.y), color);
+        break;
+    }
     case 3: // ajustes: engrenagem
         dl->AddCircle(c, s * 0.17f, color, 16, t);
         for (int i = 0; i < 8; ++i) {
@@ -295,6 +307,35 @@ void App::pollStats(float dt) {
         busMetersR_[lower(b.name)].feed(ok ? it->second.peakR : 0.0f, dt);
     }
     lateFlash_ = std::max(0.0f, lateFlash_ - dt);
+
+    // Histórico do atraso das fontes send (4 amostras por segundo, 1 minuto).
+    sendHistTimer_ -= dt;
+    const bool sample = sendHistTimer_ <= 0.0f;
+    if (sample) sendHistTimer_ = 0.25f;
+    for (const auto& s : cfg_.sources) {
+        if (s.type != SourceType::Send) continue;
+        const std::string key = lower(s.name);
+        auto it = srcStats_.find(key);
+        const bool live = mixer_ && it != srcStats_.end() && it->second.sendRate > 0;
+        float& ppm = sendPpmSmooth_[key];
+        ppm = live ? ppm + (it->second.sendPpm - ppm) * std::min(1.0f, dt * 2.0f) : 0.0f;
+        if (!sample) continue;
+        auto& h = sendDelayHist_[key];
+        h.push_back(live ? float(it->second.bufferedFrames * 1000.0 / kBusSampleRate) : -1.0f);
+        if (h.size() > 240) h.erase(h.begin(), h.begin() + std::ptrdiff_t(h.size() - 240));
+    }
+}
+
+size_t App::sendCount() const {
+    return size_t(std::count_if(cfg_.sources.begin(), cfg_.sources.end(),
+                                [](const SourceConfig& s) { return s.type == SourceType::Send; }));
+}
+
+// Estado de uma fonte send em palavras: o plugin está mandando áudio ou não.
+const char* App::sendStateName(const std::string& key) const {
+    auto it = srcStats_.find(key);
+    if (!mixer_ || it == srcStats_.end()) return running() ? "APLICAR PARA ATIVAR" : "PARADA";
+    return it->second.sendRate > 0 && it->second.state == SourceState::Running ? "CONECTADO" : "DESCONECTADO";
 }
 
 void App::refreshHardware() {
@@ -532,6 +573,7 @@ std::string App::sourceSubtitle(const SourceConfig& s) const {
     case SourceType::Loopback: d = "SAÍDA INTEIRA"; break;
     case SourceType::App: d = "PROGRAMA"; break;
     case SourceType::AppExclude: d = "TUDO MENOS"; break;
+    case SourceType::Send: return "SEND VST3 \xC2\xB7 CANAL " + std::to_string(s.sendChannel);
     }
     const std::wstring& what =
         (s.type == SourceType::App || s.type == SourceType::AppExclude) ? s.exe : s.device;
@@ -810,13 +852,13 @@ void App::drawMixerPage() {
     const float avail = ImGui::GetContentRegionAvail().x;
 
     // 01 BARRAMENTOS
-    const float cardH = S(140);
+    const float cardH = sendCount() ? S(124) : S(140);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(S(22), S(20)));
     ImGui::PushStyleColor(ImGuiCol_ChildBg, p.panel);
     ImGui::BeginChild("buses", ImVec2(avail, cardH), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar);
     if (sectionHeader("01", "BARRAMENTOS", "NOVO")) openBusEditor(-1);
     {
-        const float pw = S(150), ph = S(56);
+        const float pw = S(150), ph = sendCount() ? S(46) : S(56);
         for (size_t b = 0; b < cfg_.buses.size(); ++b) {
             if (b) ImGui::SameLine(0, S(12));
             int n = 0;
@@ -836,8 +878,10 @@ void App::drawMixerPage() {
 
     ImGui::Dummy(ImVec2(0, S(10)));
 
-    // 02 CANAIS
-    const float restH = ImGui::GetContentRegionAvail().y;
+    // 02 CANAIS (e 03 SEND DA DAW embaixo, se houver fonte send)
+    const size_t nSend = sendCount();
+    const float sendH = nSend ? S(78) + float(nSend) * S(52) : 0.0f;
+    const float restH = ImGui::GetContentRegionAvail().y - (nSend ? sendH + S(18) : 0.0f);
     ImGui::BeginChild("strips", ImVec2(avail, restH), ImGuiChildFlags_Borders,
                       ImGuiWindowFlags_HorizontalScrollbar);
     if (cfg_.buses.empty()) {
@@ -850,7 +894,7 @@ void App::drawMixerPage() {
     if (sectionHeader("02", title.c_str(), "EDITAR BARRAMENTO")) openBusEditor(int(selBus_));
 
     const float stripW = S(112), outW = S(150);
-    const float stripH = std::max(S(260), ImGui::GetContentRegionAvail().y - S(4));
+    const float stripH = std::max(S(180), ImGui::GetContentRegionAvail().y - S(4));
     for (size_t s = 0; s < cfg_.sources.size(); ++s) {
         if (s) ImGui::SameLine(0, S(12));
         drawStrip(selBus_, s, stripW, stripH);
@@ -876,8 +920,104 @@ void App::drawMixerPage() {
     drawBusOutput(selBus_, outW, stripH);
 
     ImGui::EndChild();
+    if (nSend) {
+        ImGui::Dummy(ImVec2(0, S(10)));
+        drawSendCard(sendH);
+    }
     ImGui::PopStyleColor();
     ImGui::PopStyleVar();
+}
+
+// Monitor do send da DAW: conectado ou não, taxa da DAW, atraso atual contra
+// o alvo (com o último minuto em gráfico) e a correção de relógio aplicada.
+void App::drawSendCard(float h) {
+    const Palette& p = palette();
+    const float avail = ImGui::GetContentRegionAvail().x;
+    ImGui::BeginChild("send", ImVec2(avail, h), ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar);
+    sectionHeader("03", "SEND DA DAW", nullptr);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImFont* fb = fonts().bold;
+    ImFont* fs = fonts().small;
+    const float W = ImGui::GetContentRegionAvail().x;
+    const float rowH = S(46);
+
+    for (size_t i = 0; i < cfg_.sources.size(); ++i) {
+        const SourceConfig& sc = cfg_.sources[i];
+        if (sc.type != SourceType::Send) continue;
+        const std::string key = lower(sc.name);
+        auto st = srcStats_.find(key);
+        const bool live = mixer_ && st != srcStats_.end() && st->second.sendRate > 0;
+        ImGui::PushID(int(i));
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        if (ImGui::InvisibleButton("row", ImVec2(W, rowH))) openSourceEditor(int(i));
+        if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        dl->AddRectFilled(a, ImVec2(a.x + W, a.y + rowH), col(p.bg), S(12));
+        const float cy = a.y + rowH * 0.5f;
+
+        // Nome e canal.
+        dl->AddText(fb, fb->FontSize, ImVec2(a.x + S(16), cy - fb->FontSize + S(2)), col(p.text), sc.name.c_str());
+        const std::string ch = "CANAL " + std::to_string(sc.sendChannel);
+        spacedText(dl, ImVec2(a.x + S(16), cy + S(4)), ch.c_str(), col(p.textDim), fs, S(1.2f));
+
+        // Selo conectado/desconectado.
+        const char* stName = sendStateName(key);
+        const float sw = spacedWidth(stName, fs, S(1.3f));
+        const float pw = sw + S(34), ph = S(28);
+        const ImVec2 p0(a.x + S(130), cy - ph * 0.5f);
+        const ImVec4& sc1 = live ? p.ok : p.danger;
+        dl->AddRectFilled(p0, ImVec2(p0.x + pw, p0.y + ph), col(live ? p.accent : p.border, 0.18f), ph * 0.5f);
+        dl->AddRect(p0, ImVec2(p0.x + pw, p0.y + ph), col(live ? p.accent : p.border), ph * 0.5f, 0, 1.0f);
+        dl->AddCircleFilled(ImVec2(p0.x + S(14), cy), S(4), col(mixer_ && st != srcStats_.end() ? sc1 : p.textDim));
+        spacedText(dl, ImVec2(p0.x + S(24), cy - fs->FontSize * 0.5f), stName, col(live ? p.accentHi : p.textDim),
+                   fs, S(1.3f));
+
+        // Números: taxa da DAW, atraso x alvo, correção de relógio.
+        float x = p0.x + S(170);
+        auto stat = [&](const char* label, const char* value, const ImVec4& vc, float w) {
+            spacedText(dl, ImVec2(x, cy - fs->FontSize - S(1)), label, col(p.textDim), fs, S(1.2f));
+            dl->AddText(fb, fb->FontSize, ImVec2(x, cy + S(1)), col(vc), value);
+            x += w;
+        };
+        char rate[24], delay[40], ppm[24];
+        const float targetMs = st != srcStats_.end() ? float(st->second.targetFrames * 1000.0 / kBusSampleRate)
+                                                      : float(cfg_.latencyMs);
+        const float delayMs = live ? float(st->second.bufferedFrames * 1000.0 / kBusSampleRate) : 0.0f;
+        if (live) std::snprintf(rate, sizeof(rate), "%.1f kHz", st->second.sendRate / 1000.0);
+        else std::snprintf(rate, sizeof(rate), "--");
+        if (live) std::snprintf(delay, sizeof(delay), "%.0f ms / alvo %.0f", delayMs, targetMs);
+        else std::snprintf(delay, sizeof(delay), "--");
+        if (live) std::snprintf(ppm, sizeof(ppm), "%+.0f ppm", sendPpmSmooth_[key]);
+        else std::snprintf(ppm, sizeof(ppm), "--");
+        const bool offTarget = live && std::fabs(delayMs - targetMs) > targetMs * 0.5f;
+        stat("DAW", rate, p.text, S(100));
+        stat("ATRASO", delay, offTarget ? p.warn : p.text, S(160));
+        stat("CLOCK", ppm, std::fabs(sendPpmSmooth_[key]) > 3000.0f ? p.warn : p.text, S(100));
+
+        // Gráfico do atraso no último minuto, com a linha do alvo.
+        const float gx0 = x + S(10), gx1 = a.x + W - S(16);
+        if (gx1 - gx0 > S(80)) {
+            const float gy0 = a.y + S(6), gy1 = a.y + rowH - S(6);
+            dl->AddRectFilled(ImVec2(gx0, gy0), ImVec2(gx1, gy1), col(p.panel), S(6));
+            const float maxMs = std::max(targetMs * 2.0f, 10.0f);
+            auto yOf = [&](float ms) { return gy1 - std::clamp(ms / maxMs, 0.0f, 1.0f) * (gy1 - gy0); };
+            const float ty = yOf(targetMs);
+            dl->AddLine(ImVec2(gx0, ty), ImVec2(gx1, ty), col(p.accent, 0.35f), 1.0f);
+            const auto& hist = sendDelayHist_[key];
+            const float stepX = (gx1 - gx0) / 239.0f;
+            const size_t off = 240 - std::min<size_t>(240, hist.size());
+            for (size_t k = 1; k < hist.size(); ++k) {
+                if (hist[k - 1] < 0.0f || hist[k] < 0.0f) continue;
+                dl->AddLine(ImVec2(gx0 + float(off + k - 1) * stepX, yOf(hist[k - 1])),
+                            ImVec2(gx0 + float(off + k) * stepX, yOf(hist[k])), col(p.accentHi), S(1.5f));
+            }
+            const char* lbl = "ÚLTIMO MINUTO";
+            spacedText(dl, ImVec2(gx1 - spacedWidth(lbl, fs, S(1.0f)) - S(6), gy0 + S(2)), lbl,
+                       col(p.textDim, 0.7f), fs, S(1.0f));
+        }
+        ImGui::PopID();
+        ImGui::Dummy(ImVec2(0, S(2)));
+    }
+    ImGui::EndChild();
 }
 
 void App::drawStrip(size_t bus, size_t src, float w, float h) {
@@ -914,7 +1054,7 @@ void App::drawStrip(size_t bus, size_t src, float w, float h) {
     }
 
     const float bodyTop = a.y + S(40);
-    const float footH = S(78);
+    const float footH = S(66);
     const float bodyH = h - (bodyTop - a.y) - footH;
 
     if (!r.routed) {
@@ -975,11 +1115,11 @@ void App::drawStrip(size_t bus, size_t src, float w, float h) {
         else std::snprintf(db, sizeof(db), "%+.1f dB", std::fabs(d) < 0.05f ? 0.0f : d);
         const ImVec2 dz = fb->CalcTextSizeA(fb->FontSize, FLT_MAX, 0, db);
         const float fy = a.y + h - footH;
-        dl->AddText(fb, fb->FontSize, ImVec2(a.x + (w - dz.x) * 0.5f, fy + S(4)),
+        dl->AddText(fb, fb->FontSize, ImVec2(a.x + (w - dz.x) * 0.5f, fy + S(2)),
                     col(r.muted ? p.danger : p.text), db);
 
-        const float bw = w - S(24), bh = S(28);
-        const ImVec2 b0(a.x + S(12), fy + S(36));
+        const float bw = w - S(24), bh = S(26);
+        const ImVec2 b0(a.x + S(12), fy + S(28));
         ImGui::SetCursorScreenPos(b0);
         if (ImGui::InvisibleButton("mute", ImVec2(bw, bh))) {
             r.muted = !r.muted;
@@ -1023,7 +1163,9 @@ void App::drawBusOutput(size_t bus, float w, float h) {
     const float mw = S(14);
     const float cx = a.x + w * 0.5f;
     // Escala em dB.
+    const bool roomy = bot - top > S(170);
     for (float m : {0.0f, -6.0f, -12.0f, -18.0f, -24.0f, -36.0f, -48.0f}) {
+        if (!roomy && (m == -6.0f || m == -18.0f || m == -36.0f)) continue;
         const float f = (m - kMinDb) / (0.0f - kMinDb);
         const float y = bot - f * (bot - top);
         char lbl[8];
@@ -1083,7 +1225,8 @@ void App::drawSourcesPage() {
         const float q = S(42);
         const ImVec2 q0(a.x + S(14), a.y + (rowH - q) * 0.5f);
         dl->AddRectFilled(q0, ImVec2(q0.x + q, q0.y + q), col(p.accent, 0.9f), S(10));
-        drawIcon(dl, sc.type == SourceType::Capture ? 1 : sc.type == SourceType::Loopback ? 5 : 4, ImVec2(q0.x + q * 0.5f, q0.y + q * 0.5f), S(22),
+        drawIcon(dl, sc.type == SourceType::Capture ? 1 : sc.type == SourceType::Loopback ? 5
+                     : sc.type == SourceType::Send ? 6 : 4, ImVec2(q0.x + q * 0.5f, q0.y + q * 0.5f), S(22),
                  col(ImVec4(0.06f, 0.04f, 0.1f, 1)));
 
         const float tx = q0.x + q + S(16);
@@ -1092,7 +1235,9 @@ void App::drawSourcesPage() {
 
         // Estado, medidor e contadores à direita.
         const float rx = a.x + W - S(16);
-        const char* stName = !inEngine ? (running() ? "APLICAR PARA ATIVAR" : "PARADA")
+        const bool isSend = sc.type == SourceType::Send;
+        const char* stName = isSend ? sendStateName(key)
+                             : !inEngine ? (running() ? "APLICAR PARA ATIVAR" : "PARADA")
                              : st->second.state == SourceState::Running    ? "RODANDO"
                              : st->second.state == SourceState::Connecting ? "CONECTANDO"
                              : st->second.state == SourceState::Waiting    ? "AGUARDANDO"
@@ -1100,7 +1245,7 @@ void App::drawSourcesPage() {
         const float sw = spacedWidth(stName, fs, S(1.3f));
         const float pillW = sw + S(34), pillH = S(28);
         const ImVec2 p0(rx - pillW, a.y + (rowH - pillH) * 0.5f);
-        const bool good = inEngine && st->second.state == SourceState::Running;
+        const bool good = inEngine && st->second.state == SourceState::Running && (!isSend || st->second.sendRate > 0);
         dl->AddRectFilled(p0, ImVec2(p0.x + pillW, p0.y + pillH), col(good ? p.accent : p.border, 0.18f),
                           pillH * 0.5f);
         dl->AddRect(p0, ImVec2(p0.x + pillW, p0.y + pillH), col(good ? p.accent : p.border), pillH * 0.5f, 0,
@@ -1115,7 +1260,16 @@ void App::drawSourcesPage() {
         if (mx > tx + S(260)) {
             meterBar(ImVec2(mx, a.y + rowH * 0.5f - S(3)), ImVec2(mx + mW, a.y + rowH * 0.5f + S(3)),
                      srcMeters_[key], false);
-            if (inEngine) {
+            if (inEngine && isSend) {
+                char info[96];
+                if (st->second.sendRate > 0)
+                    std::snprintf(info, sizeof(info), "%.1f kHz \xC2\xB7 %.0f ms \xC2\xB7 %+.0f ppm",
+                                  st->second.sendRate / 1000.0,
+                                  st->second.bufferedFrames * 1000.0 / kBusSampleRate, sendPpmSmooth_[key]);
+                else
+                    std::snprintf(info, sizeof(info), "plugin no canal %d?", sc.sendChannel);
+                dl->AddText(fs, fs->FontSize * 0.9f, ImVec2(mx, a.y + rowH * 0.5f + S(9)), col(p.textDim), info);
+            } else if (inEngine) {
                 char info[96];
                 std::snprintf(info, sizeof(info), "buffer %.0f ms \xC2\xB7 falhas %llu \xC2\xB7 reconexões %llu",
                               st->second.bufferedFrames * 1000.0 / kBusSampleRate,
@@ -1336,22 +1490,38 @@ void App::drawSourceEditor() {
 
     ImGui::TextColored(p.textDim, "O que capturar");
     const SourceType types[] = {SourceType::Capture, SourceType::App, SourceType::AppExclude,
-                                SourceType::Loopback};
-    for (int i = 0; i < 4; ++i) {
+                                SourceType::Loopback, SourceType::Send};
+    const char* titles[] = {"ENTRADA", "PROGRAMA", "TUDO MENOS", "SAÍDA INTEIRA", "DAW (VST3)"};
+    const char* subs[] = {"MIC / INSTRUMENTO", "SÓ UM APP", "PC SEM UM APP", "TUDO DE UM DISP.",
+                          "PLUGIN NOVAONFOCUS SEND NO ASIO"};
+    for (int i = 0; i < 5; ++i) {
         if (i % 2) ImGui::SameLine(0, S(10));
         ImGui::PushID(i);
-        const char* t = i == 0 ? "ENTRADA" : i == 1 ? "PROGRAMA" : i == 2 ? "TUDO MENOS" : "SAÍDA INTEIRA";
-        const char* sub = i == 0 ? "MIC / INSTRUMENTO" : i == 1 ? "SÓ UM APP" : i == 2 ? "PC SEM UM APP"
-                                                                                       : "TUDO DE UM DISP.";
-        if (pill("type", t, sub, editCfg_.type == types[i], (fw - S(10)) * 0.5f, S(52)))
-            editCfg_.type = types[i];
+        const float pw = i == 4 ? fw : (fw - S(10)) * 0.5f;
+        if (pill("type", titles[i], subs[i], editCfg_.type == types[i], pw, S(52))) editCfg_.type = types[i];
         ImGui::PopID();
     }
     ImGui::TextColored(p.textDim, "%s", typeLabel(editCfg_.type));
     ImGui::Dummy(ImVec2(0, S(4)));
 
     const bool isApp = editCfg_.type == SourceType::App || editCfg_.type == SourceType::AppExclude;
-    if (isApp) {
+    std::string chanNote;
+    if (editCfg_.type == SourceType::Send) {
+        ImGui::TextColored(p.textDim, "Canal do plugin (o mesmo escolhido no NovaonFocus Send da DAW)");
+        const float cw = (fw - S(7) * 7) / 8.0f;
+        for (int c = 1; c <= 8; ++c) {
+            if (c > 1) ImGui::SameLine(0, S(7));
+            ImGui::PushID(100 + c);
+            const std::string n = std::to_string(c);
+            if (pill("ch", n.c_str(), nullptr, editCfg_.sendChannel == c, cw, S(40))) editCfg_.sendChannel = c;
+            ImGui::PopID();
+        }
+        for (size_t i = 0; i < cfg_.sources.size(); ++i)
+            if (int(i) != editSrc_ && cfg_.sources[i].type == SourceType::Send &&
+                cfg_.sources[i].sendChannel == editCfg_.sendChannel)
+                chanNote = "A fonte \"" + cfg_.sources[i].name + "\" já usa esse canal.";
+        ImGui::TextColored(p.textDim, "No FL Studio: NovaonFocus Send no último slot do Master.");
+    } else if (isApp) {
         ImGui::TextColored(p.textDim, "Programa (.exe)");
         ImGui::SetNextItemWidth(fw - S(190));
         ImGui::InputText("##exe", editExe_, sizeof(editExe_));
@@ -1398,6 +1568,7 @@ void App::drawSourceEditor() {
     if (name.empty()) problem = "Dê um nome à fonte.";
     else if (nameTaken(name, false, editSrc_)) problem = "Já existe uma fonte com esse nome.";
     else if (isApp && !*editExe_) problem = "Escolha o programa.";
+    else if (!chanNote.empty()) problem = chanNote;
     ImGui::Dummy(ImVec2(0, S(8)));
     if (!problem.empty()) ImGui::TextColored(p.warn, "%s", problem.c_str());
     else ImGui::TextColored(p.textDim, "Mudar fontes reinicia o motor ao clicar em APLICAR MUDANÇAS.");

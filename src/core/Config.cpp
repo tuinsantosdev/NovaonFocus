@@ -182,6 +182,7 @@ const char* sourceTypeName(SourceType t) {
     case SourceType::Loopback: return "loopback";
     case SourceType::App: return "app";
     case SourceType::AppExclude: return "app_exclude";
+    case SourceType::Send: return "send";
     }
     return "capture";
 }
@@ -195,6 +196,8 @@ bool saveConfig(const std::wstring& path, const EngineConfig& cfg, std::string& 
         o << "\n[source " << s.name << "]\ntype = " << sourceTypeName(s.type) << "\n";
         if (s.type == SourceType::Capture || s.type == SourceType::Loopback)
             o << "device = " << wideToUtf8(s.device.empty() ? L"default" : s.device) << "\n";
+        else if (s.type == SourceType::Send)
+            o << "channel = " << s.sendChannel << "\n";
         else
             o << "exe = " << wideToUtf8(s.exe) << "\n";
         if (s.type == SourceType::Capture)

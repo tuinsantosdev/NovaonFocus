@@ -68,6 +68,9 @@ private:
     void drawBusEditor();
     void drawStrip(size_t bus, size_t src, float w, float h);
     void drawBusOutput(size_t bus, float w, float h);
+    void drawSendCard(float h);
+    size_t sendCount() const;
+    const char* sendStateName(const std::string& key) const;
 
     // Componentes.
     float S(float v) const { return v * scale_; }
@@ -106,6 +109,12 @@ private:
     std::map<std::string, Meter> busMetersL_, busMetersR_;
     uint64_t lateTicks_ = 0, lateSeen_ = 0;
     float lateFlash_ = 0.0f;
+
+    // Monitor das fontes "send": histórico do atraso (ms, 4 por segundo,
+    // último minuto) e correção de relógio suavizada para leitura.
+    std::map<std::string, std::vector<float>> sendDelayHist_;
+    std::map<std::string, float> sendPpmSmooth_;
+    float sendHistTimer_ = 0.0f;
 
     std::vector<DeviceInfo> devices_;
     std::vector<AudioAppInfo> apps_;
