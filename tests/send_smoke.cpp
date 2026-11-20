@@ -141,7 +141,7 @@ int wmain(int argc, wchar_t** argv) {
     auto* sh = static_cast<novaon::SharedBusHeader*>(MapViewOfFile(sendMap, FILE_MAP_READ, 0, 0, novaon::sharedBusBytes()));
     std::printf("envio: %u Hz, %llu quadros escritos\n", sh->sampleRate, (unsigned long long)sh->writeFrames.load());
     if (sh->sampleRate != 44100 || sh->writeFrames.load() != t) return fail("cabeçalho do envio");
-    if (sh->readerTick == 0 || GetTickCount() - sh->readerTick > 1000) return fail("o app não marcou presença");
+    if (sh->readerTick == 0 || int32_t(GetTickCount() - sh->readerTick) > 1000) return fail("o app não marcou presença");
 
     // Confere o bus: pico perto de 0,5 e frequência perto de 1 kHz.
     HANDLE busMap = OpenFileMappingW(FILE_MAP_READ, FALSE, novaon::sharedBusName(L"smoke").c_str());

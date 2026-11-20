@@ -119,7 +119,9 @@ public:
     bool readerAlive() const {
         if (!header_) return false;
         const uint32_t t = *reinterpret_cast<volatile const uint32_t*>(&header_->readerTick);
-        return t != 0 && GetTickCount() - t < 1000;
+        // Diferença com sinal: o leitor grava GetTickCount() | 1, que pode
+        // ficar 1 ms "no futuro" e não pode virar um número enorme.
+        return t != 0 && int32_t(GetTickCount() - t) < 1000;
     }
 
     void close() {
