@@ -1,0 +1,118 @@
+#pragma once
+// Layout da memória compartilhada de um barramento (bus).
+// O app NovaonFocus escreve; o plugin do OBS lê. Este header é usado
+// pelos dois lados, então mudanças no layout exigem subir kVersion.
+
+#include <atomic>
+#include <cstdint>
+#include <string>
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+namespace novaon {
+
+constexpr uint32_t kBusMagic = 0x4E564F42;   // 'NVOB'
+constexpr uint32_t kBusVersion = 1;
+constexpr uint32_t kBusSampleRate = 48000;
+constexpr uint32_t kBusChannels = 2;
+constexpr uint32_t kBusCapacityFrames = 48000; // 1 segundo de histórico
+constexpr size_t kBusHeaderBytes = 128;
+
+struct SharedBusHeader {
+    uint32_t magic;
+    uint32_t version;
+    uint32_t sampleRate;
+    uint32_t channels;
+    uint32_t capacityFrames;
+    uint32_t reserved;
+    // Total de quadros já escritos desde a criação (monotônico).
+    alignas(8) std::atomic<uint64_t> writeFrames;
+    // GetTickCount64() da última escrita: o leitor detecta app parado.
+    alignas(8) std::atomic<uint64_t> heartbeatMs;
+};
+static_assert(sizeof(SharedBusHeader) <= kBusHeaderBytes, "header grande demais");
+
+inline size_t sharedBusBytes() {
+    return kBusHeaderBytes + size_t(kBusCapacityFrames) * kBusChannels * sizeof(float);
+}
+
+inline std::wstring sharedBusName(const std::wstring& bus) {
+    return L"Local\\NovaonFocus.Bus." + bus;
+}
+
+inline float* sharedBusData(SharedBusHeader* h) {
+    return reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(h) + kBusHeaderBytes);
+}
+
+// Lado escritor (app).
+class SharedBusWriter {
+public:
+    SharedBusWriter() = default;
+    SharedBusWriter(const SharedBusWriter&) = delete;
+    SharedBusWriter& operator=(const SharedBusWriter&) = delete;
+    ~SharedBusWriter() { close(); }
+
+    bool open(const std::wstring& bus) {
+        close();
+        const size_t bytes = sharedBusBytes();
+        mapping_ = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+                                      0, static_cast<DWORD>(bytes),
+                                      sharedBusName(bus).c_str());
+        if (!mapping_) return false;
+        const bool existed = GetLastError() == ERROR_ALREADY_EXISTS;
+        void* view = MapViewOfFile(mapping_, FILE_MAP_ALL_ACCESS, 0, 0, bytes);
+        if (!view) { close(); return false; }
+        header_ = static_cast<SharedBusHeader*>(view);
+        // Se o OBS ainda segura o mapeamento de uma execução anterior,
+        // continuamos do mesmo contador para o leitor não se perder.
+        const bool reusable = existed && header_->magic == kBusMagic &&
+                              header_->version == kBusVersion &&
+                              header_->capacityFrames == kBusCapacityFrames &&
+                              header_->channels == kBusChannels;
+        if (!reusable) {
+            header_->magic = 0;
+            header_->version = kBusVersion;
+            header_->sampleRate = kBusSampleRate;
+            header_->channels = kBusChannels;
+            header_->capacityFrames = kBusCapacityFrames;
+            header_->reserved = 0;
+            header_->writeFrames.store(0, std::memory_order_relaxed);
+            header_->heartbeatMs.store(GetTickCount64(), std::memory_order_relaxed);
+            std::atomic_thread_fence(std::memory_order_release);
+            header_->magic = kBusMagic;
+        }
+        return true;
+    }
+
+    void write(const float* interleaved, size_t frames) {
+        if (!header_) return;
+        float* data = sharedBusData(header_);
+        uint64_t w = header_->writeFrames.load(std::memory_order_relaxed);
+        for (size_t i = 0; i < frames; ++i) {
+            const size_t slot = static_cast<size_t>((w + i) % kBusCapacityFrames);
+            data[slot * 2] = interleaved[i * 2];
+            data[slot * 2 + 1] = interleaved[i * 2 + 1];
+        }
+        header_->writeFrames.store(w + frames, std::memory_order_release);
+        header_->heartbeatMs.store(GetTickCount64(), std::memory_order_relaxed);
+    }
+
+    void close() {
+        if (header_) UnmapViewOfFile(header_);
+        if (mapping_) CloseHandle(mapping_);
+        header_ = nullptr;
+        mapping_ = nullptr;
+    }
+
+private:
+    HANDLE mapping_ = nullptr;
+    SharedBusHeader* header_ = nullptr;
+};
+
+} // namespace novaon

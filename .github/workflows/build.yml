@@ -1,0 +1,33 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Só os headers do libobs; a lib de importação sai de obs-plugin/obs.def.
+      - name: Headers do OBS
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse --branch 31.0.0 https://github.com/obsproject/obs-studio obs-src
+          git -C obs-src sparse-checkout set libobs
+
+      - name: Configurar
+        run: cmake -S . -B build -A x64 -DNOVAON_BUILD_OBS_PLUGIN=ON -DNOVAON_OBS_SOURCE_DIR="${{ github.workspace }}/obs-src"
+
+      - name: Compilar
+        run: cmake --build build --config Release
+
+      - name: Empacotar
+        run: cmake --install build --config Release --prefix dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NovaonFocus-windows-x64
+          path: dist/
