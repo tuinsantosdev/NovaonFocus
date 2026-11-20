@@ -47,10 +47,14 @@ Tipos de fonte:
 
 ## Uso
 
+Dê **duplo clique** no `novaonfocus.exe` para rodar com o `novaonfocus.ini` da mesma pasta. Se algo estiver errado na configuração, a janela fica aberta mostrando o erro.
+
+Num terminal (PowerShell ou Prompt de Comando, dentro da pasta):
+
 ```
 novaonfocus devices     # nomes das entradas e saídas
 novaonfocus apps        # programas tocando som agora (nome do .exe)
-novaonfocus run         # roda com novaonfocus.ini
+novaonfocus             # roda com novaonfocus.ini (igual ao duplo clique)
 ```
 
 Edite o [`novaonfocus.ini`](config/novaonfocus.ini) com as suas fontes e barramentos. Com o programa rodando:

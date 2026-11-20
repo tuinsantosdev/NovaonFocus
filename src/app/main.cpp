@@ -147,25 +147,56 @@ int cmdRun(const std::wstring& path) {
 
 } // namespace
 
+// Aberto com duplo clique, o console pertence só a este processo; nesse
+// caso seguramos a janela no fim para a pessoa conseguir ler as mensagens.
+bool ownsConsole() {
+    DWORD pids[2];
+    return GetConsoleProcessList(pids, 2) <= 1;
+}
+
+// novaonfocus.ini ao lado do .exe (o diretório atual pode ser outro).
+std::wstring defaultConfigPath() {
+    wchar_t buf[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    std::wstring path(buf, n);
+    const size_t slash = path.find_last_of(L"\\/");
+    path = slash == std::wstring::npos ? L"" : path.substr(0, slash + 1);
+    return path + L"novaonfocus.ini";
+}
+
 int wmain(int argc, wchar_t** argv) {
     SetConsoleOutputCP(CP_UTF8);
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool pauseAtEnd = ownsConsole();
 
-    const std::wstring cmd = argc > 1 ? argv[1] : L"";
+    // Sem argumentos (duplo clique), roda o roteamento direto.
+    const std::wstring cmd = argc > 1 ? argv[1] : L"run";
     int rc = 0;
     if (cmd == L"devices") {
         rc = cmdDevices();
     } else if (cmd == L"apps") {
         rc = cmdApps();
     } else if (cmd == L"run") {
-        rc = cmdRun(argc > 2 ? argv[2] : L"novaonfocus.ini");
+        rc = cmdRun(argc > 2 ? std::wstring(argv[2]) : defaultConfigPath());
+        if (rc != 0)
+            std::printf("\nDica: rode \"novaonfocus devices\" e \"novaonfocus apps\" num terminal "
+                        "para ver os nomes certos para o novaonfocus.ini.\n");
     } else {
         std::printf(
             "NovaonFocus: roteador de áudio para Scarlett 2i2 + OBS\n\n"
+            "  novaonfocus                  roda com o novaonfocus.ini ao lado do .exe\n"
             "  novaonfocus devices          lista entradas e saídas\n"
             "  novaonfocus apps             lista programas tocando som\n"
-            "  novaonfocus run [arquivo]    roda o roteamento (padrão novaonfocus.ini)\n");
-        rc = cmd.empty() ? 0 : 1;
+            "  novaonfocus run [arquivo]    roda com outro arquivo de configuração\n");
+        rc = 1;
+    }
+
+    if (pauseAtEnd) {
+        std::printf("\nPressione Enter para fechar.\n");
+        std::fflush(stdout);
+        std::cin.clear();
+        std::string dummy;
+        std::getline(std::cin, dummy);
     }
 
     CoUninitialize();
