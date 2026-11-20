@@ -18,11 +18,27 @@ jobs:
           git clone --depth 1 --filter=blob:none --sparse --branch 31.0.0 https://github.com/obsproject/obs-studio obs-src
           git -C obs-src sparse-checkout set libobs
 
+      # VST3 SDK (MIT): só os submódulos que o plugin usa.
+      - name: VST3 SDK
+        run: |
+          git -c advice.detachedHead=false clone --depth 1 --branch v3.8.0_build_66 https://github.com/steinbergmedia/vst3sdk vst3sdk
+          git -C vst3sdk submodule update --init --depth 1 base pluginterfaces public.sdk
+
       - name: Configurar
-        run: cmake -S . -B build -A x64 -DNOVAON_BUILD_OBS_PLUGIN=ON -DNOVAON_OBS_SOURCE_DIR="${{ github.workspace }}/obs-src"
+        run: >
+          cmake -S . -B build -A x64
+          -DNOVAON_BUILD_OBS_PLUGIN=ON -DNOVAON_OBS_SOURCE_DIR="${{ github.workspace }}/obs-src"
+          -DNOVAON_BUILD_VST=ON -DNOVAON_VST3_SDK_DIR="${{ github.workspace }}/vst3sdk"
 
       - name: Compilar
         run: cmake --build build --config Release
+
+      - name: Teste do reamostrador
+        run: ./build/Release/resampler_test.exe
+
+      - name: Teste de ponta a ponta (plugin VST3 -> app -> bus)
+        working-directory: build/vst-plugin/Release
+        run: ./send_smoke.exe novaonfocus-send.vst3
 
       - name: Empacotar
         run: cmake --install build --config Release --prefix dist
